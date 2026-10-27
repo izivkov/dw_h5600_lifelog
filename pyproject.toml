@@ -1,0 +1,8 @@
+[project]
+name = "dw-h5600-lifelog"
+version = "0.1.0"
+description = "DW-H5600 LifeLog download and decode test tools"
+requires-python = ">=3.10"
+dependencies = [
+    "bleak>=1.0",
+]

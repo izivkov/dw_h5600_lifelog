@@ -114,7 +114,8 @@ async def _transfer(address: str, session: Session, sync: LifeLogSync) -> None:
 
     async with BleakClient(address) as client:
         print(f"connected to {address}", flush=True)
-        await client.get_services()   # explicit discovery; avoids "Service Discovery has not been performed yet"
+        if hasattr(client, "get_services"):   # bleak 1.x: explicit discovery; older bleak discovers on connect
+            await client.get_services()
         chars = {c.uuid: c for s in client.services for c in s.characteristics}
         print(f"found {len(chars)} characteristics", flush=True)
         for uuid in (UUID_DRSP, UUID_CONVOY, UUID_STATUS):
