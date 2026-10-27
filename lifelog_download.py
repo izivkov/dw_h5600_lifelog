@@ -54,6 +54,7 @@ class Session:
             "announcements": [],
         }
         self._since_flush = 0
+        self.save()   # create the file now, so a failure at any later point still leaves it on disk
 
     def log(self, direction: str, uuid: str, handle, data: bytes) -> None:
         self.doc["events"].append({
@@ -89,9 +90,24 @@ async def find_device(name: str | None, address: str | None):
 
 
 async def run(address: str, out_dir: Path, display: bool) -> Path:
-    from bleak import BleakClient   # imported here so the offline tests run without bleak
     session = Session(out_dir, {"address": address})
     sync = LifeLogSync()
+    try:
+        await _transfer(address, session, sync)
+    except BaseException as exc:
+        session.doc["error"] = f"{type(exc).__name__}: {exc}"
+        raise
+    finally:
+        session.close(finished=sync.state.done)   # always written, even on errors or Ctrl-C
+    print(f"saved to {session.path}")
+    if display:
+        from display import show_session
+        show_session(json.loads(session.path.read_text()))
+    return session.path
+
+
+async def _transfer(address: str, session: Session, sync: LifeLogSync) -> None:
+    from bleak import BleakClient   # imported here so the offline tests run without bleak
     inbox: asyncio.Queue = asyncio.Queue()
 
     async with BleakClient(address) as client:
@@ -149,12 +165,6 @@ async def run(address: str, out_dir: Path, display: bool) -> Path:
         for uuid in (UUID_DRSP, UUID_CONVOY, UUID_STATUS):
             await client.stop_notify(chars[uuid])
 
-    session.close(finished=sync.state.done)
-    print(f"saved to {session.path}")
-    if display:
-        from display import show_session
-        show_session(json.loads(session.path.read_text()))
-    return session.path
 
 
 def main() -> None:
