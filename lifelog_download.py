@@ -30,7 +30,6 @@ from pathlib import Path
 from lifelog_sync import UUID_CONVOY, UUID_DRSP, UUID_STATUS, LifeLogSync
 
 POLL_RETRY_S = 3.5          # the official app waits ~3.5 s between busy polls
-POST_END_HANDLE = 0x0016    # written after "03 01"; used only if the watch exposes this handle
 OVERALL_TIMEOUT_S = 180
 FLUSH_EVERY = 20            # rewrite the JSON after this many events
 CHAR_NAMES = {UUID_DRSP: "DRSP", UUID_CONVOY: "CONVOY", UUID_STATUS: "STATUS", "post_end": "POST_END"}
@@ -57,6 +56,7 @@ class Session:
         self.save()   # create the file now, so a failure at any later point still leaves it on disk
 
     def log(self, direction: str, uuid: str, handle, data: bytes) -> None:
+        print(f"{direction:4} {uuid:8} {data.hex(' ')[:60]}", flush=True)
         self.doc["events"].append({
             "t": round(time.time(), 3), "dir": direction,
             "uuid": uuid, "handle": handle, "hex": data.hex(),
@@ -95,6 +95,8 @@ async def run(address: str, out_dir: Path, display: bool) -> Path:
     try:
         await _transfer(address, session, sync)
     except BaseException as exc:
+        import traceback
+        traceback.print_exc()
         session.doc["error"] = f"{type(exc).__name__}: {exc}"
         raise
     finally:
@@ -111,8 +113,10 @@ async def _transfer(address: str, session: Session, sync: LifeLogSync) -> None:
     inbox: asyncio.Queue = asyncio.Queue()
 
     async with BleakClient(address) as client:
+        print(f"connected to {address}", flush=True)
+        await client.get_services()   # explicit discovery; avoids "Service Discovery has not been performed yet"
         chars = {c.uuid: c for s in client.services for c in s.characteristics}
-        handles = {c.handle: c for s in client.services for c in s.characteristics}
+        print(f"found {len(chars)} characteristics", flush=True)
         for uuid in (UUID_DRSP, UUID_CONVOY, UUID_STATUS):
             if uuid not in chars:
                 raise SystemExit(f"characteristic {uuid} not found; is this a DW-H5600?")
@@ -129,11 +133,8 @@ async def _transfer(address: str, session: Session, sync: LifeLogSync) -> None:
             elif which == "convoy":
                 char, response = chars[UUID_CONVOY], False
             else:
-                char = handles.get(POST_END_HANDLE)
-                if char is None:
-                    session.log("skip", "POST_END", POST_END_HANDLE, data)
-                    return
-                response = False
+                session.log("skip", "POST_END", None, data)   # not sent: the characteristic is not identified yet
+                return
             session.log("TX", CHAR_NAMES.get(char.uuid, char.uuid), char.handle, data)
             await client.write_gatt_char(char, data, response=response)
 
