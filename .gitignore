@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+
+# IDE
+.idea/
+*.iml
+
+# Logs and sessions
+*.log
+sessions/
