@@ -15,7 +15,13 @@ from typing import Optional
 # GATT characteristics (UUIDs from gshock_api casio_constants.py)
 UUID_DRSP = "26eb0023-b012-49a8-b1f8-394fb2032b0f"     # "DATA_REQUEST" - index announce / finish / START / END
 UUID_CONVOY = "26eb0024-b012-49a8-b1f8-394fb2032b0f"   # "CONVOY" - poll, setup, bulk 0x05 fragments, acks
-UUID_STATUS = "26eb002d-b012-49a8-b1f8-394fb2032b0f"   # watch condition 0x28 (LifeLog/ActivityLog flags)
+UUID_STATUS = "26eb002d-b012-49a8-b1f8-394fb2032b0f"   # watch condition 0x28 (LifeLog/ActivityLog flags); replies to setup requests
+UUID_SETUP_REQUEST = "26eb002e-b012-49a8-b1f8-394fb2032b0f"   # write-without-response; one-byte setup requests
+
+# Setup requests the official app sends, in order, before its first poll (capture -2, rows 233-259).
+# Each request is one byte, and the watch answers with a status notification starting with the same byte.
+# This mapping of handle 0x16 to UUID 26eb002e is inferred from the library constants and is unverified.
+SETUP_COMMANDS = [0x23, 0x10, 0x11, 0x3B, 0x3A, 0x26, 0x28, 0x20]
 
 # Byte strings copied from the capture (rows noted in comments)
 POLL = bytes.fromhex("000000")                          # CONVOY poll, repeated until reply is 00 00 00

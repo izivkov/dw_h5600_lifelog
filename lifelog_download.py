@@ -27,7 +27,8 @@ import json
 import time
 from pathlib import Path
 
-from lifelog_sync import UUID_CONVOY, UUID_DRSP, UUID_STATUS, LifeLogSync
+from lifelog_sync import (SETUP_COMMANDS, UUID_CONVOY, UUID_DRSP, UUID_SETUP_REQUEST, UUID_STATUS,
+                          LifeLogSync)
 
 POLL_RETRY_S = 3.5          # the official app waits ~3.5 s between busy polls
 OVERALL_TIMEOUT_S = 180
@@ -108,6 +109,25 @@ async def run(address: str, out_dir: Path, display: bool) -> Path:
     return session.path
 
 
+async def _wait_for_reply(inbox: asyncio.Queue, cmd: int, timeout: float):
+    """Wait for a STATUS notification that starts with the request byte. Other messages are put back."""
+    deadline = time.monotonic() + timeout
+    held = []
+    found = None
+    while time.monotonic() < deadline and found is None:
+        try:
+            uuid, data = await asyncio.wait_for(inbox.get(), timeout=deadline - time.monotonic())
+        except asyncio.TimeoutError:
+            break
+        if uuid == UUID_STATUS and data[:1] == bytes([cmd]):
+            found = data
+        else:
+            held.append((uuid, data))
+    for item in held:
+        inbox.put_nowait(item)
+    return found
+
+
 async def _transfer(address: str, session: Session, sync: LifeLogSync) -> None:
     from bleak import BleakClient   # imported here so the offline tests run without bleak
     inbox: asyncio.Queue = asyncio.Queue()
@@ -152,6 +172,16 @@ async def _transfer(address: str, session: Session, sync: LifeLogSync) -> None:
             if uuid == UUID_DRSP and data[:2] == b"\x00\x2e" and data[2:3] != b"\xff":
                 session.announce(data[2], data[3:6])
             await do_writes(sync.on_notify(uuid, data))
+
+        # Setup exchange the official app performs before polling. Each request waits for its reply.
+        for cmd in SETUP_COMMANDS:
+            await client.write_gatt_char(chars[UUID_SETUP_REQUEST], bytes([cmd]), response=False)
+            session.log("TX", "SETUP", None, bytes([cmd]))
+            reply = await _wait_for_reply(inbox, cmd, timeout=5.0)
+            if reply is None:
+                print(f"   no reply to setup request 0x{cmd:02x} (continuing)", flush=True)
+            else:
+                session.log("RX", CHAR_NAMES.get(UUID_STATUS, "STATUS"), None, reply)
 
         await do_writes(sync.start())
         deadline = time.monotonic() + OVERALL_TIMEOUT_S
