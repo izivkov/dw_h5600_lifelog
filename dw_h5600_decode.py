@@ -79,7 +79,17 @@ def records4(s, start, end):
     return [struct.unpack_from("<HH", body, i) for i in range(0, len(body) - 3, 4)]
 
 
-def decode(notifs, announced, out_csv):
+def session_inputs(doc):
+    """Take a session document (from lifelog_download.py) and return (notifications, announcements)."""
+    notifs = [bytes.fromhex(e["hex"]) for e in doc["events"]
+              if e["dir"] == "RX" and e["uuid"] == "CONVOY"]
+    announced = {}
+    for a in doc["announcements"]:
+        announced.setdefault(a["index"], int.from_bytes(bytes.fromhex(a["value"]), "little"))
+    return notifs, announced
+
+
+def decode(notifs, announced, out_csv=None):
     s = stream_from_notifications(notifs)
     t_utc, header_steps, header_energy = parse_header(s)
     spans = locate_frames(s, announced)
@@ -103,11 +113,13 @@ def decode(notifs, announced, out_csv):
             "energy_kcal_guess_raw_div_128": round(en / 128, 2) if en <= MAX_ENERGY_RAW_PER_SLOT else "",
             "steps_flag": hex(sf),
         })
-    with open(out_csv, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=list(rows[0].keys()) if rows else ["slot"])
-        w.writeheader()
-        w.writerows(rows)
+    if out_csv:
+        with open(out_csv, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=list(rows[0].keys()) if rows else ["slot"])
+            w.writeheader()
+            w.writerows(rows)
     return {
+        "rows": rows,
         "header_time_utc": t_utc.isoformat(timespec="minutes"),
         "header_steps": header_steps,
         "header_energy": header_energy,
@@ -118,4 +130,10 @@ def decode(notifs, announced, out_csv):
 
 
 if __name__ == "__main__":
-    print("usage: see test_decode.py; decode() takes notifications and announcements")
+    import json
+    if len(sys.argv) != 2:
+        sys.exit("usage: python3 dw_h5600_decode.py <session.json>")
+    doc = json.loads(Path(sys.argv[1]).read_text())
+    notifs, announced = session_inputs(doc)
+    res = decode(notifs, announced)
+    print(json.dumps({k: v for k, v in res.items() if k != "rows"}, indent=2))
