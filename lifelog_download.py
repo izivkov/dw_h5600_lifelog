@@ -112,10 +112,12 @@ async def _transfer(address: str, session: Session, sync: LifeLogSync) -> None:
     from bleak import BleakClient   # imported here so the offline tests run without bleak
     inbox: asyncio.Queue = asyncio.Queue()
 
-    async with BleakClient(address) as client:
+    def on_disconnect(_client) -> None:
+        print("!! the watch disconnected", flush=True)
+        session.doc["disconnected"] = True
+
+    async with BleakClient(address, disconnected_callback=on_disconnect) as client:
         print(f"connected to {address}", flush=True)
-        if hasattr(client, "get_services"):   # bleak 1.x: explicit discovery; older bleak discovers on connect
-            await client.get_services()
         chars = {c.uuid: c for s in client.services for c in s.characteristics}
         print(f"found {len(chars)} characteristics", flush=True)
         for uuid in (UUID_DRSP, UUID_CONVOY, UUID_STATUS):
@@ -129,6 +131,8 @@ async def _transfer(address: str, session: Session, sync: LifeLogSync) -> None:
             await client.start_notify(chars[uuid], on_notify)
 
         async def write(which: str, data: bytes) -> None:
+            if not client.is_connected:
+                raise ConnectionError("watch disconnected before this write (no reply to earlier messages)")
             if which == "drsp":
                 char, response = chars[UUID_DRSP], True
             elif which == "convoy":
